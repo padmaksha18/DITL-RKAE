@@ -115,9 +115,6 @@ class Model(nn.Module):
         self.bd2 = torch.nn.Parameter(torch.zeros([input_length]).float())
 
     def encoded_codes(self, encoder_inputs):
-        # print ("encoder inp shape:", encoder_inputs.shape)
-        # print ("self.We1 shape:", self.We1.shape)
-        # print ("self.be1", self.be1.shape)
         hidden_1 = torch.tanh(torch.matmul(encoder_inputs.float(), self.We1) + self.be1).float()
         # print ("hidden_1 shape:", hidden_1.shape)
         code = torch.tanh(torch.matmul(hidden_1, self.We2).float() + self.be2).float()
@@ -146,11 +143,11 @@ def mahanalobisdist(code):
 
     for i in range(code.shape[1]):
         for j in range(code.shape[1]):
-            mad_i = np.mean(np.abs(code[:, i] - np.mean(code[:, i])))
-            mad_j = np.mean(np.abs(code[:, j] - np.mean(code[:, j])))
+            mad_i = np.median(np.abs(code[:, i] - np.median(code[:, i])))
+            mad_j = np.median(np.abs(code[:, j] - np.median(code[:, j])))
 
-            cov[i, j] = np.dot((np.divide(code[:, i] - np.mean(code[:, i]), mad_i)),
-                               np.divide(code[:, j] - np.mean(code[:, j]), mad_j))
+            cov[i, j] = np.dot((np.divide(code[:, i] - np.median(code[:, i]), mad_i)),
+                               np.divide(code[:, j] - np.median(code[:, j]), mad_j))
             cov[i, j] = cov[i, j] / code.shape[0]
 
     inv = np.linalg.pinv(cov)
@@ -161,8 +158,8 @@ def mahanalobisdist(code):
 
     for i in range(code.shape[0]):  ## 100 * 9
         # mean = np.mean(code, axis = 0)  # 9 * 1
-        mean = np.mean(code, axis=0)  # 9 * 1   ## feature-wise median
-        delta[i, :] = code[i, :] - mean
+        median = np.median(code, axis=0)  # 9 * 1   ## feature-wise median
+        delta[i, :] = code[i, :] - median
         mdist = np.abs(np.dot(np.dot(np.transpose(delta[i, :]), inv), (delta[i, :])))  # 1*9 9*9 9*1
         mdist = np.sqrt(mdist)
         mdist_lst.append(mdist)
@@ -188,10 +185,10 @@ def mahanalobisdist_test(code_ts, code_tr):
 
     for i in range(code_tr.shape[1]):
         for j in range(code_tr.shape[1]):
-            mad_i = np.mean(np.abs(code_tr[:, i] - np.mean(code_tr[:, i])))  ## mad of feature 1
-            mad_j = np.mean(np.abs(code_tr[:, j] - np.mean(code_tr[:, j])))  ## mad of feature 2
-            cov[i, j] = np.dot((np.divide(code_tr[:, i] - np.mean(code_tr[:, i]), mad_i)),
-                               np.divide(code_tr[:, j] - np.mean(code_tr[:, j]), mad_j))
+            mad_i = np.median(np.abs(code_tr[:, i] - np.median(code_tr[:, i])))  ## mad of feature 1
+            mad_j = np.median(np.abs(code_tr[:, j] - np.median(code_tr[:, j])))  ## mad of feature 2
+            cov[i, j] = np.dot((np.divide(code_tr[:, i] - np.median(code_tr[:, i]), mad_i)),
+                               np.divide(code_tr[:, j] - np.median(code_tr[:, j]), mad_j))
             cov[i, j] = cov[i, j] / code_tr.shape[0]
 
     inv = np.linalg.pinv(cov)
@@ -202,8 +199,8 @@ def mahanalobisdist_test(code_ts, code_tr):
 
     for i in range(code_ts.shape[0]):  ## 100 * 9
         # mean = np.mean(code, axis = 0)  # 9 * 1
-        mean = np.mean(code_tr, axis=0)  # 9 * 1   ## feature-wise median
-        delta[i, :] = code_ts[i, :] - mean
+        median = np.median(code_tr, axis=0)  # 9 * 1   ## feature-wise median
+        delta[i, :] = code_ts[i, :] - median
         mdist = np.abs(np.dot(np.dot(np.transpose(delta[i, :]), inv), (delta[i, :])))  # 1*9 9*9 9*1
         mdist = np.sqrt(mdist)
         mdist_lst.append(mdist)
@@ -310,12 +307,6 @@ def entropy_loss(code, prior_kernel, normalize, phase, epoch):  ## calculate MI 
     # global s_x
     s_x = 4  # code
     s_y = 1  # prior 4,2
-
-    # kernel smoothing in latent space
-    #  if phase == "train":
-    #      code_k = calculate_gram_mat(code, s_x)
-    #      s_x = kernel_smoothing(code_k, code, s_x)
-    #      print ("S_X:",s_x)
 
     # entropy of code. code is batch * latent dimension
     Hx = renyi_entropy(code, "latent", sigma=s_x)
@@ -628,8 +619,3 @@ if dim_red:
     dim_reduction_plot(ts_code, test_labels, 1)
 
 writer.close()
-
-
-
-
-
