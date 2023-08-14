@@ -115,6 +115,9 @@ class Model(nn.Module):
         self.bd2 = torch.nn.Parameter(torch.zeros([input_length]).float())
 
     def encoded_codes(self, encoder_inputs):
+        # print ("encoder inp shape:", encoder_inputs.shape)
+        # print ("self.We1 shape:", self.We1.shape)
+        # print ("self.be1", self.be1.shape)
         hidden_1 = torch.tanh(torch.matmul(encoder_inputs.float(), self.We1) + self.be1).float()
         # print ("hidden_1 shape:", hidden_1.shape)
         code = torch.tanh(torch.matmul(hidden_1, self.We2).float() + self.be2).float()
@@ -210,129 +213,6 @@ def mahanalobisdist_test(code_ts, code_tr):
     return mahanalobis_dist_ts
 
 
-def calculate_gram_mat(X, sigma):  # required only for codes
-    """calculate gram matrix for variables x
-        Args:
-        x: random variable with two dimensional (N,d).
-        sigma: kernel size of x (Gaussain kernel)
-    Returns:
-        Gram matrix (N,N)
-    """
-    x = X.view(X.shape[0], -1)
-    instances_norm = torch.sum(x ** 2, -1).reshape((-1, 1))
-    dist = -2 * torch.mm(x, x.t()) + instances_norm + instances_norm.t()
-
-    return torch.exp(-dist / sigma)
-
-
-def renyi_entropy(code, data, sigma):  # code is batch * latent dim
-    # calculate entropy for single variables x (Eq.(9) in paper)
-    #         Args:
-    #         x: random variable with two dimensional (N,d).
-    #         sigma: kernel size of x (Gaussain kernel)
-    #         alpha:  alpha value of renyi entropy
-    #     Returns:
-    #         renyi alpha entropy of x.
-
-    alpha = 2
-
-    if data == "latent":
-        # code_k = calculate_gram_mat(code, sigma)
-        # sigma = kernel_smoothing(code_k, code, sigma)
-
-        # calculate kernel with new updated sigma
-        code_k = calculate_gram_mat(code, sigma)
-        code_k = code_k / torch.trace(code_k)
-        # eigv = torch.abs(torch.symeig(k, eigenvectors=True)[0])
-        eigv, eigvec = torch.linalg.eigh(code_k)
-        eig_pow = eigv ** alpha
-        entropy = (1 / (1 - alpha)) * torch.log2(torch.sum(eig_pow))
-        # entropy = -torch.sum(eig_pow)
-
-    elif data == "prior":  # For prior, RBF kernel is pre-computed. Just calculate entropy.
-        k = code / torch.trace(code)
-        # eigv = torch.abs(torch.symeig(k, eigenvectors=True)[0])
-        eigv, eigvec = torch.linalg.eigh(k)
-        eig_pow = eigv ** alpha
-        entropy = (1 / (1 - alpha)) * torch.log2(torch.sum(eig_pow))
-        # entropy = -torch.sum(eig_pow)
-
-    return entropy
-
-
-def joint_entropy(code, prior, s_x, s_y):  # x = code (batch * feats), y = prior kernel (bacth * batch)
-
-    """calculate joint entropy for random variable x and y (Eq.(10) in paper)
-        Args:
-        x: random variable with two dimensional (N,d).
-        y: random variable with two dimensional (N,d).
-        s_x: kernel size of x
-        s_y: kernel size of y
-        alpha:  alpha value of renyi entropy
-    Returns:
-        joint entropy of x and y.
-    """
-
-    alpha = 2
-
-    # s_x = kernel_smoothing(x, s_x)
-    code_k = calculate_gram_mat(code, s_x)
-    prior_k = prior
-    # prior_k = calculate_gram_mat(prior, s_y) ## prior latent kernel 100 * 29
-
-    k = torch.mul(code_k, prior_k)
-    k = k / torch.trace(k)
-    # eigv = torch.abs(torch.symeig(k, eigenvectors=True)[0])
-    eigv, eigvec = torch.linalg.eigh(k)
-    eig_pow = eigv ** alpha
-    entropy = (1 / (1 - alpha)) * torch.log2(torch.sum(eig_pow))
-    # entropy = torch.sum(eig_pow)
-
-    return entropy
-
-
-def entropy_loss(code, prior_kernel, normalize, phase, epoch):  ## calculate MI # x = code , y = prior
-
-    """calculate Mutual information between random variables x and y
-    Args:
-        x: random variable with two dimensional (N,d).
-        y: random variable with two dimensional (N,d).
-        s_x: kernel size of x
-        s_y: kernel size of y
-        normalize: bool True or False, noramlize value between (0,1)
-    Returns:
-        Mutual information between x and y (scale)
-
-    """
-    # global s_x
-    s_x = 4  # code
-    s_y = 1  # prior 4,2
-
-    # entropy of code. code is batch * latent dimension
-    Hx = renyi_entropy(code, "latent", sigma=s_x)
-
-    # entropy of prior ##For prior, RBF kernel is pre-computed. sigma is not considered
-    Hy = renyi_entropy(prior_kernel, "prior", sigma=s_y)
-
-    # joint entropy
-    # Hxy = joint_entropy(x, y, s_x, s_y)
-    Hxy = joint_entropy(code, prior_kernel, s_x, s_y)
-
-    if normalize:
-        # Ixy = Hx + Hy - Hxy
-        Ixy = ((Hx * Hy) / (Hxy * Hxy))
-        Ixy = Ixy / (torch.max(Hx, Hy))
-        # Ixy = torch.log2(Ixy)
-
-    else:
-        # Ixy = Hx + Hy - Hxy
-        Ixy = ((Hx * Hy) / (Hxy * Hxy))
-        Ixy = Ixy / (torch.max(Hx, Hy))
-        # Ixy = torch.log2(Ixy)
-
-    return Ixy
-
-
 # Initialize model
 model = Model()
 # model = model.double()
@@ -355,9 +235,8 @@ writer = SummaryWriter()
 time_tr_start = time.time()
 batch_size = args.batch_size
 max_batches = train_data.shape[0] // batch_size
-loss_track = []
-kloss_track = []
-entrpy_loss_track = []
+total_loss_train_track = []
+total_loss_val_track = []
 mahanalobis_dist_list = []
 min_vs_loss = np.infty
 model_dir = "logs/dkae_models/m_0.ckpt"
@@ -415,23 +294,19 @@ try:
                 print("Error in train MD:", e)
 
             # reconstruct_loss_reg = 1 / torch.std((dec_out_val - encoder_in_val) ** 2)
-            reconstruct_loss_reg = 0.05
+            reconstruct_loss_reg = 0.1
             # print("RECONS LOSS REG:", (reconstruct_loss_reg))
 
             # Mahalanobis regularizer
             # mahalanobis_reg = mahanalobisdist_reg(code_tr, code_vs)
-            mahalanobis_reg = 0.95
+            mahalanobis_reg = 0.9
             mahanalobis_dist = mahanalobisdist(code_tr)
-            # mahalanobis_reg = torch.std(mahanalobis_dist)
-            # print("MAHA LOSS REG:", (mahalanobis_reg))
 
-            # handle the error torch._C._LinAlgError: torch.linalg.eigh: The algorithm failed to converge because
-            # the input matrix is ill-conditioned or has too many repeated eigenvalues
 
-            # try:
-            entrpy_loss = entropy_loss(code_tr, prior_K, True, "train", ep)
-            entrpy_loss = -entrpy_loss
-            entrpy_loss = entrpy_loss.float()
+            # # try:
+            # entrpy_loss = entropy_loss(code_tr, prior_K, True, "train", ep)
+            # entrpy_loss = -entrpy_loss
+            # entrpy_loss = entrpy_loss.float()
             # print ("ENTRPY LOSS:", (entrpy_loss))
             # except Exception as e:
             #     print ("Error in train entropy:", e)
@@ -444,18 +319,18 @@ try:
             for tf_var in parameters:
                 reg_loss += torch.mean(torch.linalg.norm(tf_var))
 
-            # tot_loss = reconstruct_loss + args.w_reg * reg_loss + args.a_reg * entrpy_loss
-            # tot_loss = (mahalanobis_reg * mahanalobis_dist) + args.w_reg * reg_loss + args.a_reg * entrpy_loss
-            tot_loss = (reconstruct_loss_reg * reconstruct_loss) + (
-                        mahalanobis_reg * mahanalobis_dist) + args.w_reg * reg_loss + args.a_reg * -entrpy_loss
-            tot_loss = tot_loss.float()
+            recons_loss_tr = reconstruct_loss_reg * reconstruct_loss #+ args.w_reg * reg_loss #+ args.a_reg * entrpy_loss
+            md_loss_tr = (mahalanobis_reg * mahanalobis_dist) #+ args.w_reg * reg_loss #+ args.a_reg * entrpy_loss
+
+            tot_loss_train = recons_loss_tr + md_loss_tr + args.w_reg * reg_loss  # + args.a_reg * -entrpy_loss
+            tot_loss_train = tot_loss_train.float()
             # print("TOTAL LOSS:", tot_loss)
 
             # Backpropagation
             optimizer.zero_grad()
             # tot_loss.backward(retain_graph=True)
             # print ("TOT LOSS:", tot_loss)
-            tot_loss.backward()
+            tot_loss_train.backward()
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_gradient_norm)
             # optimizer.apply_gradients(zip(clipped_gradients, parameters))
@@ -463,9 +338,8 @@ try:
 
             # tot_l0oss = tot_loss.detach()
 
-            loss_track.append(tot_loss)
-            # kloss_track.append(k_loss)
-            entrpy_loss_track.append(entrpy_loss)
+            total_loss_train_track.append(tot_loss_train)
+            #md_loss_track.append(md_loss_tr)
 
         # check training progress on the validations set (in blood data valid=train)
         if ep % 50 == 0:
@@ -492,53 +366,42 @@ try:
             dec_out_val = model.decoder(encoder_inp)
             # print ("DEC OUT VAL:", dec_out_val)
 
-            try:
-                # Calculate entropy of latent code for val data
-                entrpy_loss_val = entropy_loss(code_vs, prior_K_vs, True, "validation", ep)  # takes time
-                entrpy_loss_val = -entrpy_loss_val
-                # print("ENTRPY_LOSS_VAL:", (entrpy_loss_val))
-            except Exception as e:
-                print("error in VAL entropy:", e)
-                break
-
             reconstruct_loss_val = torch.mean((dec_out_val - encoder_inp) ** 2)
             # print("reconstruct_loss_val:", reconstruct_loss_val)
 
             # reconstruct_loss_val_reg = 1 / torch.std(((dec_out_val - encoder_inp) ** 2))
-            reconstruct_loss_val_reg = 0.05
+            reconstruct_loss_val_reg = 0.1
             # print("reconstruct_loss_val_reg:", reconstruct_loss_val_reg)
 
             try:
                 mahanalobis_dist = mahanalobisdist(code_vs)
-                # mahanalobis_dist = np.mean(mahanalobis_dist)
-                # print("MAHALANOBIS DIST VAL:", mahanalobis_dist)
-                # mahanalobis_dist_list.append(mahanalobis_dist)
+
             except Exception as e:
                 print("Error in VAL MD:", e)
                 break
 
             # Mahalanobis regularizer
             # mahalanobis_reg_val = mahanalobisdist_reg(code_tr,code_vs)
-            mahalanobis_reg_val = 0.95
-            # mahalanobis_dist = mahanalobisdist(code_vs)
-            # mahalanobis_reg_val = np.std(mahalanobis_dist)
-            # print("MAHA LOSS REG:", (mahalanobis_reg_val))
+            mahalanobis_reg_val = 0.9
 
-            # continue
+            recons_loss_val = reconstruct_loss_val_reg * reconstruct_loss_val
+            md_loss_val = mahalanobis_reg_val * mahanalobis_dist
 
-            # tot_loss_val = (0.25 * reconstruct_loss_val) + ( 0.75 * mahanalobis_dist) # take MD reg for validation as 1
-            tot_loss_val = reconstruct_loss_val_reg * reconstruct_loss_val + mahalanobis_reg_val * mahanalobis_dist
-            # tot_loss_val = reconstruct_loss_val
+            tot_loss_val = recons_loss_val + md_loss_val + args.w_reg * reg_loss  # + args.a_reg * -entrpy_loss
+            tot_loss_val = tot_loss_val.float()
 
-            writer.add_scalar("reconstruct_loss", reconstruct_loss_val, ep)
-            writer.add_scalar("entrpy_loss", entrpy_loss_val, ep)
+            total_loss_val_track.append(tot_loss_val)
+
+            writer.add_scalar("tot_loss", tot_loss_train, ep)
+            writer.add_scalar("tot_loss_val", tot_loss_val, ep)
 
             # print ("loss_track    :", loss_track)
             # print ("entrpy_loss_track:", entrpy_loss_track)
 
-            print('VS r_loss=%.8f,entropy_loss=%.8f -- TR r_loss=%.8f, entropy_loss=%.8f' % (
-                tot_loss_val, entrpy_loss_val, torch.mean(torch.stack(loss_track[-50:])),
-                torch.mean(torch.stack(entrpy_loss_track[-50:]))))
+            #
+            print('VS r_loss=%.8f -- TR r_loss=%.8f' % (
+                tot_loss_val,  torch.mean(torch.stack(total_loss_train_track[-50:]))))
+            #
 
             # Save model yielding best results on validation
             if tot_loss_val < min_vs_loss:
@@ -581,14 +444,12 @@ print("recons_loss_test:", recons_loss_test)
 
 mahanalobis_dist_test = mahanalobisdist(ts_code)
 # mahanalobis_dist_test = np.mean (mahanalobis_dist_test)
-print("MAHALANOBIS DIST TRAIN:", mahanalobis_dist_test)
+print("MAHALANOBIS DIST Test:", mahanalobis_dist_test)
 
 # sample wise MD
 mahanalobis_dist_ts = mahanalobisdist_test(ts_code, tr_code)
 
-
-tot_loss = recons_loss_test
-# tot_loss = (0.05 * recons_loss_test) + (0.95 * mahanalobis_dist_test)
+tot_loss = (0.05 * recons_loss_test) + (0.95 * mahanalobis_dist_test)
 print('Test loss: %.5f' % (tot_loss))
 
 # reverse transformations
@@ -612,6 +473,7 @@ ts_code = ts_code.detach().numpy()
 
 print("Test labels:", test_labels.shape)
 acc, f1, auc = classify_with_knn(test_data, test_labels[:], pred, mahanalobis_dist_ts)
+# acc, f1, auc = classify_with_knn(train_data, train_labels, test_data, test_labels)
 print('kNN -- acc: %.3f, F1: %.3f, AUC: %.3f' % (acc, f1, auc))
 
 # dim reduction plots
@@ -619,3 +481,7 @@ if dim_red:
     dim_reduction_plot(ts_code, test_labels, 1)
 
 writer.close()
+
+
+
+
