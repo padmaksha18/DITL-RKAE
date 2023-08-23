@@ -8,33 +8,14 @@ from TS_datasets import getBlood
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-from utils import classify_with_knn, interp_data, mse_and_corr, dim_reduction_plot
+from utils import classify_with_knn, interp_data, mse_and_corr
 import math
 from scipy import stats
 import scipy
 import os
 import datetime
-from scipy.stats import gaussian_kde
-from math import sqrt
-from math import log
-from torch import optim
-from torch.autograd import Variable
-from math import sqrt
-from math import log
-from sklearn.neighbors import KernelDensity
-from sklearn.model_selection import GridSearchCV
-from scipy.stats import norm
-from scipy.spatial.distance import pdist, squareform
-from scipy.optimize import minimize
-from sklearn.decomposition import PCA
-from sklearn.covariance import MinCovDet
-from scipy import stats
-from scipy.spatial.distance import pdist, squareform
 import numpy as np
-import scipy
-from scipy.special import rel_entr
-from sklearn.metrics.pairwise import manhattan_distances
-from sklearn.preprocessing import normalize
+
 
 dim_red = 1  # perform PCA on the codes and plot the first two components
 plot_on = 1  # plot the results, otherwise only textual output is returned
@@ -56,12 +37,10 @@ args = parser.parse_args()
 print(args)
 
 # ================= DATASET =================
-(train_data, train_labels, train_len, _, K_tr,
- valid_data, _, valid_len, _, K_vs,
- test_data_orig, test_labels, test_len, _, K_ts) = getBlood(kernel='TCK',
-                                                            inp='zero')  # data shape is [T, N, V] = [time_steps, num_elements, num_var]
-# print ("test labels:", test_labels)
-# sort test data (for a better visualization of the inner product of the codes)
+(train_data, train_labels, train_len, _,
+ valid_data, _, valid_len, _,
+ test_data_orig, test_labels, test_len, _,) = getBlood(kernel='TCK',
+                                                            inp='zero')
 
 test_data = test_data_orig
 train_data = train_data
@@ -79,7 +58,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using {device} device")
 
 encoder_inputs = train_data
-prior_k = K_tr
+#prior_k = K_tr
 
 # Save entropies
 entropy_list = []
@@ -115,24 +94,16 @@ class Model(nn.Module):
         self.bd2 = torch.nn.Parameter(torch.zeros([input_length]).float())
 
     def encoded_codes(self, encoder_inputs):
-        # print ("encoder inp shape:", encoder_inputs.shape)
-        # print ("self.We1 shape:", self.We1.shape)
-        # print ("self.be1", self.be1.shape)
-        hidden_1 = torch.tanh(torch.matmul(encoder_inputs.float(), self.We1) + self.be1).float()
+        hidden_1 = torch.relu(torch.matmul(encoder_inputs.float(), self.We1) + self.be1).float()
         # print ("hidden_1 shape:", hidden_1.shape)
         code = torch.tanh(torch.matmul(hidden_1, self.We2).float() + self.be2).float()
         return code
 
     def decoder(self, encoder_inputs):
         code = self.encoded_codes(encoder_inputs).float()
-
-        # code = torch.sigmoid(code)
-        hidden_2 = torch.tanh(torch.matmul(code, self.Wd1).float() + self.bd1)
-        # activation = torch.relu(hidden_2)
+        hidden_2 = torch.relu(torch.matmul(code, self.Wd1).float() + self.bd1)
         dec_out = torch.matmul(hidden_2, self.Wd2).float() + self.bd2
-        # dec_out = torch.sigmoid(dec_out)
         return dec_out
-
 
 def mahanalobisdist(code):
     '''
@@ -208,7 +179,7 @@ def mahanalobisdist_test(code_ts, code_tr):
         mdist = np.sqrt(mdist)
         mdist_lst.append(mdist)
 
-    mahanalobis_dist_ts = torch.from_numpy(np.asarray(mdist_lst))
+    mahanalobis_dist_ts = torch.from_numpy(np.asarray((mdist_lst)))
     # print("mdist :", mahanalobis_dist)
     return mahanalobis_dist_ts
 
@@ -223,8 +194,8 @@ print('Total parameters: {}'.format(total_params))
 
 # Optimizer
 # optimizer = torch.optim.Adam(model.parameters(),args.learning_rate)
-optimizer = torch.optim.Adam(params=model.parameters(), lr=args.learning_rate, betas=(0.9, 0.999), eps=1e-08,
-                             weight_decay=0.001, amsgrad=False)
+optimizer = torch.optim.Adam(params=model.parameters(), lr=args.learning_rate, eps=1e-8,
+                             weight_decay=0.002, amsgrad=False)
 
 # ============= TENSORBOARD =============
 writer = SummaryWriter()
@@ -243,9 +214,9 @@ model_dir = "logs/dkae_models/m_0.ckpt"
 
 logdir = os.path.join("logs", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
 
-##############################################################################
-# Training code
-##############################################################################
+#############################################################################
+#Training code
+#############################################################################
 
 try:
     for ep in range(args.num_epochs):
@@ -253,39 +224,28 @@ try:
         # shuffle training data
         idx = np.random.permutation(train_data.shape[0])
         train_data_s = train_data[idx, :]
-        K_tr_s = K_tr[idx, :][:, idx]
 
         for batch in range(max_batches):
             fdtr = {}
             fdtr["encoder_inputs"] = train_data_s[(batch) * batch_size:(batch + 1) * batch_size, :]
-            fdtr["prior_K"] = K_tr_s[(batch) * batch_size:(batch + 1) * batch_size,
-                              (batch) * batch_size:(batch + 1) * batch_size]
 
             encoder_inputs = (fdtr["encoder_inputs"].astype(float))
             encoder_inputs = torch.from_numpy(encoder_inputs)
-            # print("SHAPE ENCODER_INP:", (encoder_inputs.size()))
-
-            prior_K = (fdtr["prior_K"].astype(float))
-            prior_K = torch.from_numpy(prior_K)
-            # print ("SHAPE PRIOR K TRAIN:", prior_K.size())
 
             dec_out = model.decoder(encoder_inputs)
 
             code_tr = model.encoded_codes(encoder_inputs)
             code_tr = code_tr.float()
-            # print ("CODE TR SHAPE:", code_tr.size())
-            # print("CODE TR:", code_tr)
 
             reconstruct_loss = torch.mean((dec_out - encoder_inputs) ** 2)
             reconstruct_loss = reconstruct_loss.float()
+
 
             # This is just to calculate the regularization term
             encoder_in_val = torch.from_numpy(valid_data)
             code_vs = model.encoded_codes(encoder_in_val)
             dec_out_val = model.decoder(encoder_in_val)
 
-            # This is to handle the error "numpy.linalg.LinAlgError: SVD did not converge" which arises rarely
-            # even when the latent code is full rank whiel taking the inverse
             try:
                 mahanalobis_dist = mahanalobisdist(code_tr)
                 # mahanalobis_dist = np.mean(mdist_lst)
@@ -294,22 +254,14 @@ try:
                 print("Error in train MD:", e)
 
             # reconstruct_loss_reg = 1 / torch.std((dec_out_val - encoder_in_val) ** 2)
-            reconstruct_loss_reg = 0.1
+            reconstruct_loss_reg = 0.05
             # print("RECONS LOSS REG:", (reconstruct_loss_reg))
 
             # Mahalanobis regularizer
             # mahalanobis_reg = mahanalobisdist_reg(code_tr, code_vs)
-            mahalanobis_reg = 0.9
+            mahalanobis_reg = 4
             mahanalobis_dist = mahanalobisdist(code_tr)
-
-
-            # # try:
-            # entrpy_loss = entropy_loss(code_tr, prior_K, True, "train", ep)
-            # entrpy_loss = -entrpy_loss
-            # entrpy_loss = entrpy_loss.float()
-            # print ("ENTRPY LOSS:", (entrpy_loss))
-            # except Exception as e:
-            #     print ("Error in train entropy:", e)
+          # print("MD LOSS:", mahanalobis_dist)
 
             # Regularization L2 loss
             reg_loss = 0
@@ -319,17 +271,15 @@ try:
             for tf_var in parameters:
                 reg_loss += torch.mean(torch.linalg.norm(tf_var))
 
-            recons_loss_tr = reconstruct_loss_reg * reconstruct_loss #+ args.w_reg * reg_loss #+ args.a_reg * entrpy_loss
-            md_loss_tr = (mahalanobis_reg * mahanalobis_dist) #+ args.w_reg * reg_loss #+ args.a_reg * entrpy_loss
+            recons_loss_tr = reconstruct_loss_reg * reconstruct_loss #+ args.w_reg * reg_loss  #+ args.a_reg * entrpy_loss
+            md_loss_tr = (mahalanobis_reg * mahanalobis_dist) #+ args.w_reg * reg_loss      #+ args.a_reg * entrpy_loss
 
-            tot_loss_train = recons_loss_tr + md_loss_tr + args.w_reg * reg_loss  # + args.a_reg * -entrpy_loss
+            tot_loss_train = recons_loss_tr + md_loss_tr  + (args.w_reg * reg_loss)
             tot_loss_train = tot_loss_train.float()
             # print("TOTAL LOSS:", tot_loss)
 
             # Backpropagation
             optimizer.zero_grad()
-            # tot_loss.backward(retain_graph=True)
-            # print ("TOT LOSS:", tot_loss)
             tot_loss_train.backward()
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_gradient_norm)
@@ -342,26 +292,19 @@ try:
             #md_loss_track.append(md_loss_tr)
 
         # check training progress on the validations set (in blood data valid=train)
-        if ep % 50 == 0:
+        if ep % 1 == 0:
             print('Ep: {}'.format(ep))
             fdvs = {}
 
             fdvs["encoder_inputs"] = valid_data
-            fdvs["prior_K"] = K_vs
+            #fdvs["prior_K"] = K_vs
 
             encoder_inp = (fdvs["encoder_inputs"].astype(float))
 
             encoder_inp = torch.from_numpy(encoder_inp)
             # print("SHAPE ENCODER_INP:", (encoder_inp.size()))
 
-            prior_K_vs = (fdvs["prior_K"].astype(float))
-
-            prior_K_vs = torch.from_numpy(prior_K_vs)
-            # print("SHAPE PRIOR K VAL:", prior_K_vs.size()) ## 1500 * 1500
-
             code_vs = model.encoded_codes(encoder_inp)
-            # print("SHAPE CODE_VS VAL:", code_vs.size()) ## 1500 * 9
-            # print("CODE_VS VAL:", code_vs)  ## 1500 * 9
 
             dec_out_val = model.decoder(encoder_inp)
             # print ("DEC OUT VAL:", dec_out_val)
@@ -370,24 +313,16 @@ try:
             # print("reconstruct_loss_val:", reconstruct_loss_val)
 
             # reconstruct_loss_val_reg = 1 / torch.std(((dec_out_val - encoder_inp) ** 2))
-            reconstruct_loss_val_reg = 0.1
+            reconstruct_loss_val_reg = 0.05
             # print("reconstruct_loss_val_reg:", reconstruct_loss_val_reg)
 
-            try:
-                mahanalobis_dist = mahanalobisdist(code_vs)
-
-            except Exception as e:
-                print("Error in VAL MD:", e)
-                break
-
-            # Mahalanobis regularizer
-            # mahalanobis_reg_val = mahanalobisdist_reg(code_tr,code_vs)
-            mahalanobis_reg_val = 0.9
+            mahanalobis_dist = mahanalobisdist(code_vs)
+            mahalanobis_reg_val = 4
 
             recons_loss_val = reconstruct_loss_val_reg * reconstruct_loss_val
             md_loss_val = mahalanobis_reg_val * mahanalobis_dist
 
-            tot_loss_val = recons_loss_val + md_loss_val + args.w_reg * reg_loss  # + args.a_reg * -entrpy_loss
+            tot_loss_val = (recons_loss_val + md_loss_val) + (args.w_reg * reg_loss)  # + args.a_reg * -entrpy_loss
             tot_loss_val = tot_loss_val.float()
 
             total_loss_val_track.append(tot_loss_val)
@@ -395,12 +330,9 @@ try:
             writer.add_scalar("tot_loss", tot_loss_train, ep)
             writer.add_scalar("tot_loss_val", tot_loss_val, ep)
 
-            # print ("loss_track    :", loss_track)
-            # print ("entrpy_loss_track:", entrpy_loss_track)
-
             #
             print('VS r_loss=%.8f -- TR r_loss=%.8f' % (
-                tot_loss_val,  torch.mean(torch.stack(total_loss_train_track[-50:]))))
+                tot_loss_val,  torch.mean(torch.stack(total_loss_train_track[-10:]))))
             #
 
             # Save model yielding best results on validation
@@ -442,19 +374,10 @@ recons_loss_test = np.mean((pred - test_data) ** 2)
 print("recons_loss_test:", recons_loss_test)
 # recons_loss = np.mean((pred - test_data) ** 2)
 
-mahanalobis_dist_test = mahanalobisdist(ts_code)
-# mahanalobis_dist_test = np.mean (mahanalobis_dist_test)
-print("MAHALANOBIS DIST Test:", mahanalobis_dist_test)
-
 # sample wise MD
 mahanalobis_dist_ts = mahanalobisdist_test(ts_code, tr_code)
 
-tot_loss = (0.05 * recons_loss_test) + (0.95 * mahanalobis_dist_test)
-print('Test loss: %.5f' % (tot_loss))
-
 # reverse transformations
-# print("Test data shape:" , test_data_orig.shape)
-# pred = np.reshape(pred, (test_data_orig.shape[1], test_data_orig.shape[0], test_data_orig.shape[2]))
 pred = np.reshape(pred, (test_data_orig.shape[1], test_data_orig.shape[0]))
 pred = np.transpose(pred, axes=[1, 0])
 
@@ -465,20 +388,11 @@ test_data = test_data_orig
 test_mse, test_corr, tot_mae = mse_and_corr(test_data, test_labels[:], pred, test_len)
 print('Test MSE: %.5f\nTest Pearson correlation: %.3f\nTest MAE: %.5f' % (test_mse, test_corr, tot_mae))
 
-# kNN classification on the codes
-print("train labels shape:", train_labels.shape)
 
 tr_code = tr_code.detach().numpy()
 ts_code = ts_code.detach().numpy()
 
-print("Test labels:", test_labels.shape)
-acc, f1, auc = classify_with_knn(test_data, test_labels[:], pred, mahanalobis_dist_ts)
-# acc, f1, auc = classify_with_knn(train_data, train_labels, test_data, test_labels)
-print('kNN -- acc: %.3f, F1: %.3f, AUC: %.3f' % (acc, f1, auc))
-
-# dim reduction plots
-if dim_red:
-    dim_reduction_plot(ts_code, test_labels, 1)
+acc, precision, recall = classify_with_knn(test_data, test_labels[:], pred, mahanalobis_dist_ts)
 
 writer.close()
 
