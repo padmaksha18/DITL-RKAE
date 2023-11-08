@@ -13,7 +13,7 @@ from sklearn.decomposition import PCA
 from sklearn import datasets
 from sklearn.preprocessing import StandardScaler
 
-def classify_with_knn(test_data, test_labels, pred,mahanalobis_dist_ts):
+def classify_with_md(test_data, test_labels, pred,mahanalobis_dist_ts):
 
     """
     Perform classification with knn.
