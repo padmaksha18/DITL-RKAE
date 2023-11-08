@@ -16,7 +16,7 @@ from sklearn.preprocessing import StandardScaler
 def classify_with_md(test_data, test_labels, pred,mahanalobis_dist_ts):
 
     """
-    Perform classification with knn.
+    Perform classification with robust MD.
     """
     from sklearn.metrics import f1_score, precision_score, roc_auc_score, recall_score, confusion_matrix
     from sklearn import metrics
