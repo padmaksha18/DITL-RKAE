@@ -8,7 +8,7 @@ from dataloader_ae import getData
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-from utils import classify_with_knn, interp_data, mse_and_corr
+from utils import classify_with_md, interp_data, mse_and_corr
 import math
 from scipy import stats
 import scipy
@@ -392,7 +392,7 @@ print('Test MSE: %.5f\nTest Pearson correlation: %.3f\nTest MAE: %.5f' % (test_m
 tr_code = tr_code.detach().numpy()
 ts_code = ts_code.detach().numpy()
 
-acc, precision, recall = classify_with_knn(test_data, test_labels[:], pred, mahanalobis_dist_ts)
+acc, precision, recall = classify_with_md(test_data, test_labels[:], pred, mahanalobis_dist_ts)
 
 writer.close()
 
