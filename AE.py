@@ -4,7 +4,7 @@ from torchvision.utils import save_image
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import argparse
-from TS_datasets import getBlood
+from dataloader_ae import getBlood
 import time
 import numpy as np
 import matplotlib.pyplot as plt
