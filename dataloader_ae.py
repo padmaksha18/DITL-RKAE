@@ -3,7 +3,7 @@ import scipy.io
 import pandas as pd
 
 
-def getBlood(kernel='TCK', inp='zero'):
+def getData(kernel='TCK', inp='zero'):
     df = pd.read_csv(
         "/content/gdrive/MyDrive/OOD_generalization/mate-mi-reg-model/DATA_2/DDOS_GOLDEN_EYE.csv")
         
