@@ -130,6 +130,7 @@ def mahanalobisdist(code):
     delta = np.zeros((code.shape[0], code.shape[1]))
     mdist_lst = []
 
+ #Mahalanobis distance
     for i in range(code.shape[0]):  ## 100 * 9
         # mean = np.mean(code, axis = 0)  # 9 * 1
         median = np.median(code, axis=0)  # 9 * 1   ## feature-wise median
