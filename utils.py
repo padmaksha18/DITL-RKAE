@@ -63,7 +63,7 @@ def classify_with_md(test_data, test_labels, pred,mahanalobis_dist_ts):
     print ("Accuracy,Precision,Recall:", accuracy,precision, recall)
     confusion_mat = confusion_matrix(test_labels, pred_levels)
     print ("CONF MAT:", confusion_mat)
-    tn, fp, fn, tp = confusion_matrix(test_labels, pred_levels).ravel()
+    
 
 
     return accuracy, precision, recall
