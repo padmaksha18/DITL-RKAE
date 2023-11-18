@@ -33,7 +33,7 @@ def classify_with_md(test_data, test_labels, pred,mahanalobis_dist_ts):
         #print("test_data_i shape:", test_data_i.shape)
         recons_err = np.mean((test_data_i - pred_i) ** 2)
         md_dist = mahanalobis_dist_ts[i]
-        anom_score = (0.05 * recons_err ) + (1 * md_dist)
+        anom_score = (0.05 * recons_err ) + (0.95 * md_dist)
         anom_list.append (anom_score)
 
     #print ("test labels:", test_labels[:50] )
